@@ -1,3 +1,10 @@
+wlroots (0.12.0-2) unstable; urgency=medium
+
+  * Team upload
+  * Kick off to unstable
+
+ -- nicoo <nicoo@debian.org>  Sun, 14 Feb 2021 12:10:50 +0100
+
 wlroots (0.12.0-1) experimental; urgency=medium
 
   * Upload to experimental
