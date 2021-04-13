@@ -15,7 +15,7 @@ Build-Depends:
  libpixman-1-dev,
  libpng-dev,
  libsystemd-dev,
- libwayland-dev (>= 1.16),
+ libwayland-dev (>= 1.19),
  libxcb1-dev,
  libxcb-composite0-dev,
  libxcb-icccm4-dev,
