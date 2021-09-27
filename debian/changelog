@@ -1,6 +1,8 @@
 wlroots (0.14.1-1) experimental; urgency=medium
 
   * New upstream version 0.14.1
+  * Bump soname to 9
+  * d/control: Build-depend on libseat-dev
 
  -- Guido Günther <agx@sigxcpu.org>  Mon, 27 Sep 2021 22:36:50 +0200
 
