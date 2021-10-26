@@ -1,0 +1,51 @@
+From: Simon Ser <contact@emersion.fr>
+Date: Mon, 22 Mar 2021 11:42:57 +0100
+Subject: examples/dmabuf-capture: stop using av_init_packet
+
+It's deprecated in ffmpeg >= 4.4.
+
+Closes: https://github.com/swaywm/wlroots/issues/2798
+(cherry picked from commit 6230f7be4f92b83df7ea8e6487410b3b81dd4b1d)
+---
+ examples/dmabuf-capture.c | 15 ++++++++-------
+ 1 file changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/examples/dmabuf-capture.c b/examples/dmabuf-capture.c
+index 60cdb65..4d05b78 100644
+--- a/examples/dmabuf-capture.c
++++ b/examples/dmabuf-capture.c
+@@ -490,26 +490,27 @@ static void *vid_encode_thread(void *arg) {
+ 		}
+ 
+ 		while (1) {
+-			AVPacket pkt;
+-			av_init_packet(&pkt);
+-
+-			int ret = avcodec_receive_packet(ctx->avctx, &pkt);
++			AVPacket *pkt = av_packet_alloc();
++			int ret = avcodec_receive_packet(ctx->avctx, pkt);
+ 			if (ret == AVERROR(EAGAIN)) {
++				av_packet_free(&pkt);
+ 				break;
+ 			} else if (ret == AVERROR_EOF) {
+ 				av_log(ctx, AV_LOG_INFO, "Encoder flushed!\n");
++				av_packet_free(&pkt);
+ 				goto end;
+ 			} else if (ret) {
+ 				av_log(ctx, AV_LOG_ERROR, "Error encoding: %s!\n",
+ 						av_err2str(ret));
++				av_packet_free(&pkt);
+ 				err = ret;
+ 				goto end;
+ 			}
+ 
+-			pkt.stream_index = 0;
+-			err = av_interleaved_write_frame(ctx->avf, &pkt);
++			pkt->stream_index = 0;
++			err = av_interleaved_write_frame(ctx->avf, pkt);
+ 
+-			av_packet_unref(&pkt);
++			av_packet_free(&pkt);
+ 
+ 			if (err) {
+ 				av_log(ctx, AV_LOG_ERROR, "Writing packet fail: %s!\n",
