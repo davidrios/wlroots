@@ -52,6 +52,7 @@ Depends:
  libgles2-mesa-dev,
  libinput-dev (>= 1.7.0),
  libpixman-1-dev,
+ libseat-dev,
  libsystemd-dev,
  libwayland-dev (>= 1.15),
  libxcb1-dev,
