@@ -1,11 +1,16 @@
 subdir('wlr')
 
 exclude_files = ['meson.build', 'config.h.in', 'version.h.in']
-if conf_data.get('WLR_HAS_X11_BACKEND', 0) != 1
+if not features.get('x11-backend')
 	exclude_files += 'backend/x11.h'
 endif
-if conf_data.get('WLR_HAS_XWAYLAND', 0) != 1
+if not features.get('xwayland')
 	exclude_files += 'xwayland.h'
+else
+	subdir('xwayland')
+endif
+if not features.get('gles2-renderer')
+	exclude_files += ['render/egl.h', 'render/gles2.h']
 endif
 
 install_subdir('wlr',

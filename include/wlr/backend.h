@@ -11,7 +11,6 @@
 
 #include <wayland-server-core.h>
 #include <wlr/backend/session.h>
-#include <wlr/render/egl.h>
 
 struct wlr_backend_impl;
 
@@ -26,22 +25,19 @@ struct wlr_backend {
 		/** Raised when new outputs are added, passed the wlr_output */
 		struct wl_signal new_output;
 	} events;
+
+	// Private state
+
+	struct wlr_renderer *renderer;
+	struct wlr_allocator *allocator;
 };
 
-typedef struct wlr_renderer *(*wlr_renderer_create_func_t)(struct wlr_egl *egl, EGLenum platform,
-	void *remote_display, EGLint *config_attribs, EGLint visual_id);
 /**
  * Automatically initializes the most suitable backend given the environment.
  * Will always return a multibackend. The backend is created but not started.
  * Returns NULL on failure.
- *
- * The compositor can request to initialize the backend's renderer by setting
- * the create_render_func. The callback must initialize the given wlr_egl and
- * return a valid wlr_renderer, or NULL if it has failed to initiaze it.
- * Pass NULL as create_renderer_func to use the backend's default renderer.
  */
-struct wlr_backend *wlr_backend_autocreate(struct wl_display *display,
-	wlr_renderer_create_func_t create_renderer_func);
+struct wlr_backend *wlr_backend_autocreate(struct wl_display *display);
 /**
  * Start the backend. This may signal new_input or new_output immediately, but
  * may also wait until the display's event loop begins. Returns false on
@@ -66,5 +62,12 @@ struct wlr_session *wlr_backend_get_session(struct wlr_backend *backend);
  * Returns the clock used by the backend for presentation feedback.
  */
 clockid_t wlr_backend_get_presentation_clock(struct wlr_backend *backend);
+/**
+ * Returns the DRM node file descriptor used by the backend's underlying
+ * platform. Can be used by consumers for additional rendering operations.
+ * The consumer must not close the file descriptor since the backend continues
+ * to have ownership of it.
+ */
+int wlr_backend_get_drm_fd(struct wlr_backend *backend);
 
 #endif

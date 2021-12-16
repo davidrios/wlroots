@@ -163,28 +163,16 @@ const char *conn_get_name(uint32_t type_id) {
 	case DRM_MODE_CONNECTOR_eDP:         return "eDP";
 	case DRM_MODE_CONNECTOR_VIRTUAL:     return "Virtual";
 	case DRM_MODE_CONNECTOR_DSI:         return "DSI";
-#ifdef DRM_MODE_CONNECTOR_DPI
 	case DRM_MODE_CONNECTOR_DPI:         return "DPI";
+	case DRM_MODE_CONNECTOR_WRITEBACK:   return "Writeback";
+#ifdef DRM_MODE_CONNECTOR_SPI
+	case DRM_MODE_CONNECTOR_SPI:         return "SPI";
 #endif
 	default:                             return "Unknown";
 	}
 }
 
-static void free_fb(struct gbm_bo *bo, void *data) {
-	uint32_t id = (uintptr_t)data;
-
-	if (id) {
-		struct gbm_device *gbm = gbm_bo_get_device(bo);
-		drmModeRmFB(gbm_device_get_fd(gbm), id);
-	}
-}
-
 uint32_t get_fb_for_bo(struct gbm_bo *bo, bool with_modifiers) {
-	uint32_t id = (uintptr_t)gbm_bo_get_user_data(bo);
-	if (id) {
-		return id;
-	}
-
 	struct gbm_device *gbm = gbm_bo_get_device(bo);
 
 	int fd = gbm_device_get_fd(gbm);
@@ -204,24 +192,37 @@ uint32_t get_fb_for_bo(struct gbm_bo *bo, bool with_modifiers) {
 		modifiers[i] = gbm_bo_get_modifier(bo);
 	}
 
+	uint32_t id = 0;
 	if (with_modifiers && gbm_bo_get_modifier(bo) != DRM_FORMAT_MOD_INVALID) {
 		if (drmModeAddFB2WithModifiers(fd, width, height, format, handles,
 				strides, offsets, modifiers, &id, DRM_MODE_FB_MODIFIERS)) {
 			wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
 		}
 	} else {
-		if (drmModeAddFB2(fd, width, height, format, handles, strides,
-				offsets, &id, 0)) {
-			wlr_log_errno(WLR_ERROR, "Unable to add DRM framebuffer");
+		int ret = drmModeAddFB2(fd, width, height, format, handles, strides,
+			offsets, &id, 0);
+		if (ret != 0 && gbm_bo_get_format(bo) == GBM_FORMAT_ARGB8888 &&
+				gbm_bo_get_plane_count(bo) == 1) {
+			// Some big-endian machines don't support drmModeAddFB2. Try a
+			// last-resort fallback for ARGB8888 buffers, like Xorg's
+			// modesetting driver does.
+			wlr_log(WLR_DEBUG, "drmModeAddFB2 failed (%s), falling back to "
+				"legacy drmModeAddFB", strerror(-ret));
+
+			uint32_t depth = 32;
+			uint32_t bpp = gbm_bo_get_bpp(bo);
+			ret = drmModeAddFB(fd, width, height, depth, bpp, strides[0],
+				handles[0], &id);
+		}
+		if (ret != 0) {
+			wlr_log(WLR_ERROR, "Unable to add DRM framebuffer: %s", strerror(-ret));
 		}
 	}
-
-	gbm_bo_set_user_data(bo, (void *)(uintptr_t)id, free_fb);
 
 	return id;
 }
 
-static inline bool is_taken(size_t n, const uint32_t arr[static n], uint32_t key) {
+static bool is_taken(size_t n, const uint32_t arr[static n], uint32_t key) {
 	for (size_t i = 0; i < n; ++i) {
 		if (arr[i] == key) {
 			return true;

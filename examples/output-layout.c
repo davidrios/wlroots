@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200112L
-#include <GLES2/gl2.h>
+#include <drm_fourcc.h>
 #include <limits.h>
 #include <math.h>
 #include <stdio.h>
@@ -158,10 +158,6 @@ static void new_output_notify(struct wl_listener *listener, void *data) {
 	struct wlr_output *output = data;
 	struct sample_state *sample = wl_container_of(listener, sample, new_output);
 	struct sample_output *sample_output = calloc(1, sizeof(struct sample_output));
-	if (!wl_list_empty(&output->modes)) {
-		struct wlr_output_mode *mode = wl_container_of(output->modes.prev, mode, link);
-		wlr_output_set_mode(output, mode);
-	}
 	wlr_output_layout_add_auto(sample->layout, output);
 	sample_output->output = output;
 	sample_output->sample = sample;
@@ -169,6 +165,11 @@ static void new_output_notify(struct wl_listener *listener, void *data) {
 	sample_output->frame.notify = output_frame_notify;
 	wl_signal_add(&output->events.destroy, &sample_output->destroy);
 	sample_output->destroy.notify = output_remove_notify;
+
+	struct wlr_output_mode *mode = wlr_output_preferred_mode(output);
+	if (mode != NULL) {
+		wlr_output_set_mode(output, mode);
+	}
 
 	wlr_output_commit(output);
 }
@@ -190,7 +191,7 @@ static void keyboard_key_notify(struct wl_listener *listener, void *data) {
 		// and make this change in pixels/sec^2
 		// Also, key repeat
 		int delta = 75;
-		if (event->state == WLR_KEY_PRESSED) {
+		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 			switch (sym) {
 			case XKB_KEY_Left:
 				update_velocities(sample, -delta, 0);
@@ -228,18 +229,12 @@ static void new_input_notify(struct wl_listener *listener, void *data) {
 		keyboard->destroy.notify = keyboard_destroy_notify;
 		wl_signal_add(&device->keyboard->events.key, &keyboard->key);
 		keyboard->key.notify = keyboard_key_notify;
-		struct xkb_rule_names rules = { 0 };
-		rules.rules = getenv("XKB_DEFAULT_RULES");
-		rules.model = getenv("XKB_DEFAULT_MODEL");
-		rules.layout = getenv("XKB_DEFAULT_LAYOUT");
-		rules.variant = getenv("XKB_DEFAULT_VARIANT");
-		rules.options = getenv("XKB_DEFAULT_OPTIONS");
 		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		if (!context) {
 			wlr_log(WLR_ERROR, "Failed to create XKB context");
 			exit(1);
 		}
-		struct xkb_keymap *keymap = xkb_map_new_from_names(context, &rules,
+		struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL,
 			XKB_KEYMAP_COMPILE_NO_FLAGS);
 		if (!keymap) {
 			wlr_log(WLR_ERROR, "Failed to create XKB keymap");
@@ -267,7 +262,7 @@ int main(int argc, char *argv[]) {
 	state.layout = wlr_output_layout_create();
 	clock_gettime(CLOCK_MONOTONIC, &state.ts_last);
 
-	struct wlr_backend *wlr = wlr_backend_autocreate(display, NULL);
+	struct wlr_backend *wlr = wlr_backend_autocreate(display);
 	if (!wlr) {
 		exit(1);
 	}
@@ -279,7 +274,7 @@ int main(int argc, char *argv[]) {
 
 	state.renderer = wlr_backend_get_renderer(wlr);
 	state.cat_texture = wlr_texture_from_pixels(state.renderer,
-		WL_SHM_FORMAT_ABGR8888, cat_tex.width * 4, cat_tex.width, cat_tex.height,
+		DRM_FORMAT_ABGR8888, cat_tex.width * 4, cat_tex.width, cat_tex.height,
 		cat_tex.pixel_data);
 
 	if (!wlr_backend_start(wlr)) {

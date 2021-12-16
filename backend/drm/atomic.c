@@ -25,16 +25,16 @@ static void atomic_begin(struct atomic *atom) {
 
 static bool atomic_commit(struct atomic *atom,
 		struct wlr_drm_connector *conn, uint32_t flags) {
-	struct wlr_drm_backend *drm =
-		get_drm_backend_from_backend(conn->output.backend);
+	struct wlr_drm_backend *drm = conn->backend;
 	if (atom->failed) {
 		return false;
 	}
 
 	int ret = drmModeAtomicCommit(drm->fd, atom->req, flags, drm);
-	if (ret) {
-		wlr_log_errno(WLR_ERROR, "%s: Atomic %s failed (%s)",
-			conn->output.name,
+	if (ret != 0) {
+		wlr_drm_conn_log_errno(conn,
+			(flags & DRM_MODE_ATOMIC_TEST_ONLY) ? WLR_DEBUG : WLR_ERROR,
+			"Atomic %s failed (%s)",
 			(flags & DRM_MODE_ATOMIC_TEST_ONLY) ? "test" : "commit",
 			(flags & DRM_MODE_ATOMIC_ALLOW_MODESET) ? "modeset" : "pageflip");
 		return false;
@@ -55,13 +55,16 @@ static void atomic_add(struct atomic *atom, uint32_t id, uint32_t prop, uint64_t
 }
 
 static bool create_mode_blob(struct wlr_drm_backend *drm,
-		struct wlr_drm_crtc *crtc, uint32_t *blob_id) {
-	if (!crtc->pending.active) {
+		struct wlr_drm_connector *conn, const struct wlr_output_state *state,
+		uint32_t *blob_id) {
+	if (!drm_connector_state_active(conn, state)) {
 		*blob_id = 0;
 		return true;
 	}
 
-	if (drmModeCreatePropertyBlob(drm->fd, &crtc->pending.mode->drm_mode,
+	drmModeModeInfo mode = {0};
+	drm_connector_state_mode(conn, state, &mode);
+	if (drmModeCreatePropertyBlob(drm->fd, &mode,
 			sizeof(drmModeModeInfo), blob_id)) {
 		wlr_log_errno(WLR_ERROR, "Unable to create mode property blob");
 		return false;
@@ -136,24 +139,22 @@ static void set_plane_props(struct atomic *atom, struct wlr_drm_backend *drm,
 	uint32_t id = plane->id;
 	const union wlr_drm_plane_props *props = &plane->props;
 	struct wlr_drm_fb *fb = plane_get_next_fb(plane);
-	struct gbm_bo *bo = drm_fb_acquire(fb, drm, &plane->mgpu_surf);
-	if (!bo) {
+	if (fb == NULL) {
+		wlr_log(WLR_ERROR, "Failed to acquire FB");
 		goto error;
 	}
 
-	uint32_t fb_id = get_fb_for_bo(bo, drm->addfb2_modifiers);
-	if (!fb_id) {
-		goto error;
-	}
+	uint32_t width = gbm_bo_get_width(fb->bo);
+	uint32_t height = gbm_bo_get_height(fb->bo);
 
 	// The src_* properties are in 16.16 fixed point
 	atomic_add(atom, id, props->src_x, 0);
 	atomic_add(atom, id, props->src_y, 0);
-	atomic_add(atom, id, props->src_w, (uint64_t)plane->surf.width << 16);
-	atomic_add(atom, id, props->src_h, (uint64_t)plane->surf.height << 16);
-	atomic_add(atom, id, props->crtc_w, plane->surf.width);
-	atomic_add(atom, id, props->crtc_h, plane->surf.height);
-	atomic_add(atom, id, props->fb_id, fb_id);
+	atomic_add(atom, id, props->src_w, (uint64_t)width << 16);
+	atomic_add(atom, id, props->src_h, (uint64_t)height << 16);
+	atomic_add(atom, id, props->crtc_w, width);
+	atomic_add(atom, id, props->crtc_h, height);
+	atomic_add(atom, id, props->fb_id, fb->id);
 	atomic_add(atom, id, props->crtc_id, crtc_id);
 	atomic_add(atom, id, props->crtc_x, (uint64_t)x);
 	atomic_add(atom, id, props->crtc_y, (uint64_t)y);
@@ -166,31 +167,35 @@ error:
 }
 
 static bool atomic_crtc_commit(struct wlr_drm_backend *drm,
-		struct wlr_drm_connector *conn, uint32_t flags) {
+		struct wlr_drm_connector *conn, const struct wlr_output_state *state,
+		uint32_t flags) {
 	struct wlr_output *output = &conn->output;
 	struct wlr_drm_crtc *crtc = conn->crtc;
 
+	bool modeset = drm_connector_state_is_modeset(state);
+	bool active = drm_connector_state_active(conn, state);
+
 	uint32_t mode_id = crtc->mode_id;
-	if (crtc->pending_modeset) {
-		if (!create_mode_blob(drm, crtc, &mode_id)) {
+	if (modeset) {
+		if (!create_mode_blob(drm, conn, state, &mode_id)) {
 			return false;
 		}
 	}
 
 	uint32_t gamma_lut = crtc->gamma_lut;
-	if (output->pending.committed & WLR_OUTPUT_STATE_GAMMA_LUT) {
+	if (state->committed & WLR_OUTPUT_STATE_GAMMA_LUT) {
 		// Fallback to legacy gamma interface when gamma properties are not
 		// available (can happen on older Intel GPUs that support gamma but not
 		// degamma).
 		if (crtc->props.gamma_lut == 0) {
 			if (!drm_legacy_crtc_set_gamma(drm, crtc,
-					output->pending.gamma_lut_size,
-					output->pending.gamma_lut)) {
+					state->gamma_lut_size,
+					state->gamma_lut)) {
 				return false;
 			}
 		} else {
-			if (!create_gamma_lut_blob(drm, output->pending.gamma_lut_size,
-					output->pending.gamma_lut, &gamma_lut)) {
+			if (!create_gamma_lut_blob(drm, state->gamma_lut_size,
+					state->gamma_lut, &gamma_lut)) {
 				return false;
 			}
 		}
@@ -199,29 +204,27 @@ static bool atomic_crtc_commit(struct wlr_drm_backend *drm,
 	bool prev_vrr_enabled =
 		output->adaptive_sync_status == WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED;
 	bool vrr_enabled = prev_vrr_enabled;
-	if ((output->pending.committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED) &&
+	if ((state->committed & WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED) &&
 			drm_connector_supports_vrr(conn)) {
-		vrr_enabled = output->pending.adaptive_sync_enabled;
+		vrr_enabled = state->adaptive_sync_enabled;
 	}
 
-	if (crtc->pending_modeset) {
+	if (modeset) {
 		flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
-	} else {
+	} else if (!(flags & DRM_MODE_ATOMIC_TEST_ONLY)) {
 		flags |= DRM_MODE_ATOMIC_NONBLOCK;
 	}
 
 	struct atomic atom;
 	atomic_begin(&atom);
-	atomic_add(&atom, conn->id, conn->props.crtc_id,
-		crtc->pending.active ? crtc->id : 0);
-	if (crtc->pending_modeset && crtc->pending.active &&
-			conn->props.link_status != 0) {
+	atomic_add(&atom, conn->id, conn->props.crtc_id, active ? crtc->id : 0);
+	if (modeset && active && conn->props.link_status != 0) {
 		atomic_add(&atom, conn->id, conn->props.link_status,
 			DRM_MODE_LINK_STATUS_GOOD);
 	}
 	atomic_add(&atom, crtc->id, crtc->props.mode_id, mode_id);
-	atomic_add(&atom, crtc->id, crtc->props.active, crtc->pending.active);
-	if (crtc->pending.active) {
+	atomic_add(&atom, crtc->id, crtc->props.active, active);
+	if (active) {
 		if (crtc->props.gamma_lut != 0) {
 			atomic_add(&atom, crtc->id, crtc->props.gamma_lut, gamma_lut);
 		}
@@ -255,8 +258,8 @@ static bool atomic_crtc_commit(struct wlr_drm_backend *drm,
 			output->adaptive_sync_status = vrr_enabled ?
 				WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED :
 				WLR_OUTPUT_ADAPTIVE_SYNC_DISABLED;
-			wlr_log(WLR_DEBUG, "VRR %s on connector '%s'",
-				vrr_enabled ? "enabled" : "disabled", output->name);
+			wlr_drm_conn_log(conn, WLR_DEBUG, "VRR %s",
+				vrr_enabled ? "enabled" : "disabled");
 		}
 	} else {
 		rollback_blob(drm, &crtc->mode_id, mode_id);

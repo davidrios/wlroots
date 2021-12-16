@@ -1,9 +1,9 @@
 project(
 	'wlroots',
 	'c',
-	version: '0.12.0',
+	version: '0.14.1',
 	license: 'MIT',
-	meson_version: '>=0.54.0',
+	meson_version: '>=0.56.0',
 	default_options: [
 		'c_std=c11',
 		'warning_level=2',
@@ -15,10 +15,15 @@ project(
 # necessary for bugfix releases. Increasing soversion is required because
 # wlroots never guarantees ABI stability -- only API stability is guaranteed
 # between minor releases.
-soversion = 7
+soversion = 9
+
+little_endian = host_machine.endian() == 'little'
+big_endian = host_machine.endian() == 'big'
 
 add_project_arguments([
 	'-DWLR_USE_UNSTABLE',
+	'-DWLR_LITTLE_ENDIAN=@0@'.format(little_endian.to_int()),
+	'-DWLR_BIG_ENDIAN=@0@'.format(big_endian.to_int()),
 ], language: 'c')
 
 cc = meson.get_compiler('c')
@@ -36,6 +41,7 @@ add_project_arguments(cc.get_supported_arguments([
 	'-Wstrict-aliasing=2',
 	'-Woverflow',
 	'-Wmissing-prototypes',
+	'-Walloca',
 
 	'-Wno-missing-braces',
 	'-Wno-missing-field-initializers',
@@ -79,50 +85,30 @@ else
 	)
 endif
 
-conf_data = configuration_data()
-conf_data.set10('WLR_HAS_SYSTEMD', false)
-conf_data.set10('WLR_HAS_ELOGIND', false)
-conf_data.set10('WLR_HAS_LIBSEAT', false)
-conf_data.set10('WLR_HAS_X11_BACKEND', false)
-conf_data.set10('WLR_HAS_XWAYLAND', false)
-conf_data.set10('WLR_HAS_XCB_ERRORS', false)
-conf_data.set10('WLR_HAS_XCB_ICCCM', false)
-conf_data.set10('WLR_HAS_EGLMESAEXT_H', false)
+features = {
+	'x11-backend': false,
+	'xwayland': false,
+	'gles2-renderer': false,
+}
+internal_features = {
+	'xcb-errors': false,
+}
 
-# Clang complains about some zeroed initializer lists (= {0}), even though they
-# are valid
-if cc.get_id() == 'clang'
-	add_project_arguments('-Wno-missing-field-initializers', language: 'c')
-	add_project_arguments('-Wno-missing-braces', language: 'c')
-endif
-
-wayland_server = dependency('wayland-server', version: '>=1.18')
+wayland_server = dependency('wayland-server', version: '>=1.19')
 wayland_client = dependency('wayland-client')
-wayland_egl = dependency('wayland-egl')
-wayland_protos = dependency('wayland-protocols', version: '>=1.17')
-egl = dependency('egl')
-glesv2 = dependency('glesv2')
-drm = dependency('libdrm', version: '>=2.4.95')
+drm = dependency('libdrm', version: '>=2.4.105')
 gbm = dependency('gbm', version: '>=17.1.0')
-libinput = dependency('libinput', version: '>=1.9.0')
+libinput = dependency('libinput', version: '>=1.14.0')
 xkbcommon = dependency('xkbcommon')
 udev = dependency('libudev')
 pixman = dependency('pixman-1')
 math = cc.find_library('m')
 rt = cc.find_library('rt')
 
-if cc.has_header('EGL/eglmesaext.h', dependencies: egl)
-	conf_data.set10('WLR_HAS_EGLMESAEXT_H', true)
-endif
-
 wlr_files = []
 wlr_deps = [
 	wayland_server,
 	wayland_client,
-	wayland_egl,
-	wayland_protos,
-	egl,
-	glesv2,
 	drm,
 	gbm,
 	libinput,
@@ -132,13 +118,6 @@ wlr_deps = [
 	math,
 	rt,
 ]
-
-libinput_ver = libinput.version().split('.')
-add_project_arguments([
-	'-DLIBINPUT_MAJOR=' + libinput_ver[0],
-	'-DLIBINPUT_MINOR=' + libinput_ver[1],
-	'-DLIBINPUT_PATCH=' + libinput_ver[2],
-], language: 'c')
 
 subdir('protocol')
 subdir('render')
@@ -151,6 +130,13 @@ subdir('xwayland')
 
 subdir('include')
 
+foreach name, have : internal_features
+	add_project_arguments(
+		'-DHAS_@0@=@1@'.format(name.underscorify().to_upper(), have.to_int()),
+		language: 'c',
+	)
+endforeach
+
 wlr_inc = include_directories('.', 'include')
 proto_inc = include_directories('protocol')
 
@@ -162,27 +148,25 @@ lib_wlr = library(
 	dependencies: wlr_deps,
 	include_directories: [wlr_inc, proto_inc],
 	install: true,
-	link_args : symbols_flag,
+	link_args: symbols_flag,
 	link_depends: symbols_file,
 )
+
+wlr_vars = {}
+foreach name, have : features
+	wlr_vars += { 'have_' + name.underscorify(): have.to_string() }
+endforeach
 
 wlroots = declare_dependency(
 	link_with: lib_wlr,
 	dependencies: wlr_deps,
 	include_directories: wlr_inc,
+	variables: wlr_vars,
 )
 
 meson.override_dependency('wlroots', wlroots)
 
-summary({
-	'systemd': conf_data.get('WLR_HAS_SYSTEMD', 0),
-	'elogind': conf_data.get('WLR_HAS_ELOGIND', 0),
-	'libseat': conf_data.get('WLR_HAS_LIBSEAT', 0),
-	'xwayland': conf_data.get('WLR_HAS_XWAYLAND', 0),
-	'x11_backend': conf_data.get('WLR_HAS_X11_BACKEND', 0),
-	'xcb-icccm': conf_data.get('WLR_HAS_XCB_ICCCM', 0),
-	'xcb-errors': conf_data.get('WLR_HAS_XCB_ERRORS', 0),
-})
+summary(features + internal_features, bool_yn: true)
 
 if get_option('examples')
 	subdir('examples')
@@ -194,4 +178,5 @@ pkgconfig.generate(lib_wlr,
 	filebase: meson.project_name(),
 	name: meson.project_name(),
 	description: 'Wayland compositor library',
+	variables: wlr_vars,
 )

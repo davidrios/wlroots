@@ -22,7 +22,7 @@ struct wlr_xwayland_cursor;
 struct wlr_xwayland_server {
 	pid_t pid;
 	struct wl_client *client;
-	struct wl_event_source *sigusr1_source;
+	struct wl_event_source *pipe_source;
 	int wm_fd[2], wl_fd[2];
 
 	time_t server_start;
@@ -120,6 +120,18 @@ struct wlr_xwayland_surface_size_hints {
 };
 
 /**
+ * This represents the input focus described as follows:
+ *
+ * https://www.x.org/releases/X11R7.6/doc/xorg-docs/specs/ICCCM/icccm.html#input_focus
+ */
+enum wlr_xwayland_icccm_input_model {
+	WLR_ICCCM_INPUT_MODEL_NONE = 0,
+	WLR_ICCCM_INPUT_MODEL_PASSIVE = 1,
+	WLR_ICCCM_INPUT_MODEL_LOCAL = 2,
+	WLR_ICCCM_INPUT_MODEL_GLOBAL = 3,
+};
+
+/**
  * An Xwayland user interface component. It has an absolute position in
  * layout-local coordinates.
  *
@@ -134,6 +146,7 @@ struct wlr_xwayland_surface {
 	uint32_t surface_id;
 
 	struct wl_list link;
+	struct wl_list stack_link;
 	struct wl_list unpaired_link;
 
 	struct wlr_surface *surface;
@@ -236,9 +249,6 @@ void wlr_xwayland_server_destroy(struct wlr_xwayland_server *server);
  *
  * The server supports a lazy mode in which Xwayland is only started when a
  * client tries to connect.
- *
- * Note: wlr_xwayland will setup a global SIGUSR1 handler on the compositor
- * process.
  */
 struct wlr_xwayland *wlr_xwayland_create(struct wl_display *wl_display,
 	struct wlr_compositor *compositor, bool lazy);
@@ -251,6 +261,14 @@ void wlr_xwayland_set_cursor(struct wlr_xwayland *wlr_xwayland,
 
 void wlr_xwayland_surface_activate(struct wlr_xwayland_surface *surface,
 	bool activated);
+
+/**
+ * Restack surface relative to sibling.
+ * If sibling is NULL, then the surface is moved to the top or the bottom
+ * of the stack (depending on the mode).
+ */
+void wlr_xwayland_surface_restack(struct wlr_xwayland_surface *surface,
+	struct wlr_xwayland_surface *sibling, enum xcb_stack_mode_t mode);
 
 void wlr_xwayland_surface_configure(struct wlr_xwayland_surface *surface,
 	int16_t x, int16_t y, uint16_t width, uint16_t height);
@@ -298,7 +316,10 @@ void wlr_xwayland_surface_ping(struct wlr_xwayland_surface *surface);
  *          false if it should be ignored
  */
 bool wlr_xwayland_or_surface_wants_focus(
-	const struct wlr_xwayland_surface *surface);
+	const struct wlr_xwayland_surface *xsurface);
 
+
+enum wlr_xwayland_icccm_input_model wlr_xwayland_icccm_input_model(
+	const struct wlr_xwayland_surface *xsurface);
 
 #endif

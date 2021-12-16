@@ -1,3 +1,47 @@
+wlroots (0.14.1-4) experimental; urgency=medium
+
+  [ Birger Schacht ]
+  * [3fafe04] Add x11 backend build dependencies also to the -dev package
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 08 Nov 2021 18:53:18 +0100
+
+wlroots (0.14.1-3) experimental; urgency=medium
+
+  * [59c2af5] d/control: Add more dependencies for x11 backend.
+    This reenables the x11 backend
+  * [d1c7991] d/rules: Force x11 backend.
+    This makes sure it doesn't get disabled again due to lack of
+    dependencies
+
+ -- Guido Günther <agx@sigxcpu.org>  Sat, 06 Nov 2021 11:42:15 +0100
+
+wlroots (0.14.1-2) experimental; urgency=medium
+
+  [ Birger Schacht ]
+  * [d512fe8] Enable XWayland again
+
+  [ Guido Günther ]
+  * [9f1d30d] d/control: Build-depend on libseat-dev
+
+ -- Guido Günther <agx@sigxcpu.org>  Fri, 05 Nov 2021 21:37:46 +0100
+
+wlroots (0.14.1-1) experimental; urgency=medium
+
+  * New upstream version 0.14.1
+  * Bump soname to 9
+  * d/control: Build-depend on libseat-dev
+
+ -- Guido Günther <agx@sigxcpu.org>  Mon, 27 Sep 2021 22:36:50 +0200
+
+wlroots (0.13.0-1) experimental; urgency=medium
+
+  * New upstream version 0.13.0
+  * Adust to soname change
+  * d/control: Bump libwayland-dev to 0.19
+  * autopkgtest: Adjust to API change
+
+ -- Guido Günther <agx@sigxcpu.org>  Tue, 13 Apr 2021 11:02:16 +0200
+
 wlroots (0.12.0-3) unstable; urgency=medium
 
   * [02be191] examples/dmabuf-capture: stop using av_init_packet

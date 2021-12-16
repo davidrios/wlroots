@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200112L
-#include <GLES2/gl2.h>
+#include <drm_fourcc.h>
 #include <getopt.h>
 #include <math.h>
 #include <stdio.h>
@@ -10,11 +10,9 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
-#include <wlr/backend/session.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output.h>
-#include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_matrix.h>
 #include <wlr/util/log.h>
@@ -108,10 +106,6 @@ static void new_output_notify(struct wl_listener *listener, void *data) {
 	struct wlr_output *output = data;
 	struct sample_state *sample = wl_container_of(listener, sample, new_output);
 	struct sample_output *sample_output = calloc(1, sizeof(struct sample_output));
-	if (!wl_list_empty(&output->modes)) {
-		struct wlr_output_mode *mode = wl_container_of(output->modes.prev, mode, link);
-		wlr_output_set_mode(output, mode);
-	}
 	sample_output->x_offs = sample_output->y_offs = 0;
 	sample_output->x_vel = sample_output->y_vel = 128;
 
@@ -123,6 +117,11 @@ static void new_output_notify(struct wl_listener *listener, void *data) {
 	wl_signal_add(&output->events.destroy, &sample_output->destroy);
 	sample_output->destroy.notify = output_remove_notify;
 	wl_list_insert(&sample->outputs, &sample_output->link);
+
+	struct wlr_output_mode *mode = wlr_output_preferred_mode(output);
+	if (mode != NULL) {
+		wlr_output_set_mode(output, mode);
+	}
 
 	wlr_output_commit(output);
 }
@@ -140,7 +139,7 @@ static void keyboard_key_notify(struct wl_listener *listener, void *data) {
 		if (sym == XKB_KEY_Escape) {
 			wl_display_terminate(sample->display);
 		}
-		if (event->state == WLR_KEY_PRESSED) {
+		if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 			switch (sym) {
 			case XKB_KEY_Left:
 				update_velocities(sample, -16, 0);
@@ -178,18 +177,12 @@ static void new_input_notify(struct wl_listener *listener, void *data) {
 		keyboard->destroy.notify = keyboard_destroy_notify;
 		wl_signal_add(&device->keyboard->events.key, &keyboard->key);
 		keyboard->key.notify = keyboard_key_notify;
-		struct xkb_rule_names rules = { 0 };
-		rules.rules = getenv("XKB_DEFAULT_RULES");
-		rules.model = getenv("XKB_DEFAULT_MODEL");
-		rules.layout = getenv("XKB_DEFAULT_LAYOUT");
-		rules.variant = getenv("XKB_DEFAULT_VARIANT");
-		rules.options = getenv("XKB_DEFAULT_OPTIONS");
 		struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 		if (!context) {
 			wlr_log(WLR_ERROR, "Failed to create XKB context");
 			exit(1);
 		}
-		struct xkb_keymap *keymap = xkb_map_new_from_names(context, &rules,
+		struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL,
 			XKB_KEYMAP_COMPILE_NO_FLAGS);
 		if (!keymap) {
 			wlr_log(WLR_ERROR, "Failed to create XKB keymap");
@@ -230,7 +223,7 @@ int main(int argc, char *argv[]) {
 			}
 			break;
 		default:
-			break;
+			return 1;
 		}
 	}
 	wlr_log_init(WLR_DEBUG, NULL);
@@ -241,7 +234,7 @@ int main(int argc, char *argv[]) {
 	};
 	wl_list_init(&state.outputs);
 
-	struct wlr_backend *wlr = wlr_backend_autocreate(display, NULL);
+	struct wlr_backend *wlr = wlr_backend_autocreate(display);
 	if (!wlr) {
 		exit(1);
 	}
@@ -259,7 +252,7 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 	state.cat_texture = wlr_texture_from_pixels(state.renderer,
-		WL_SHM_FORMAT_ABGR8888, cat_tex.width * 4, cat_tex.width, cat_tex.height,
+		DRM_FORMAT_ABGR8888, cat_tex.width * 4, cat_tex.width, cat_tex.height,
 		cat_tex.pixel_data);
 	if (!state.cat_texture) {
 		wlr_log(WLR_ERROR, "Could not start compositor, OOM");
