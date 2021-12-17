@@ -2,8 +2,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdlib.h>
-#include <wayland-server-protocol.h>
-#include <wlr/types/wlr_box.h>
+#include <wlr/util/box.h>
 #include <wlr/util/log.h>
 
 void wlr_box_closest_point(const struct wlr_box *box, double x, double y,
@@ -121,40 +120,54 @@ void wlr_box_transform(struct wlr_box *dest, const struct wlr_box *box,
 	}
 }
 
-void wlr_box_rotated_bounds(struct wlr_box *dest, const struct wlr_box *box,
-		float rotation) {
-	if (rotation == 0) {
-		*dest = *box;
-		return;
-	}
-
-	double ox = box->x + (double)box->width/2;
-	double oy = box->y + (double)box->height/2;
-
-	double c = fabs(cos(rotation));
-	double s = fabs(sin(rotation));
-
-	double x1 = ox + (box->x - ox) * c + (box->y - oy) * s;
-	double x2 = ox +
-		(box->x + box->width - ox) * c +
-		(box->y + box->height - oy) * s;
-
-	double y1 = oy + (box->x - ox) * s + (box->y - oy) * c;
-	double y2 = oy +
-		(box->x + box->width - ox) * s +
-		(box->y + box->height - oy) * c;
-
-	dest->x = floor(fmin(x1, x2));
-	dest->width = ceil(fmax(x1, x2) - fmin(x1, x2));
-	dest->y = floor(fmin(y1, y2));
-	dest->height = ceil(fmax(y1, y2) - fmin(y1, y2));
+bool wlr_fbox_empty(const struct wlr_fbox *box) {
+	return box == NULL || box->width <= 0 || box->height <= 0;
 }
 
-void wlr_box_from_pixman_box32(struct wlr_box *dest, const pixman_box32_t box) {
-	*dest = (struct wlr_box){
-		.x = box.x1,
-		.y = box.y1,
-		.width = box.x2 - box.x1,
-		.height = box.y2 - box.y1,
-	};
+void wlr_fbox_transform(struct wlr_fbox *dest, const struct wlr_fbox *box,
+		enum wl_output_transform transform, double width, double height) {
+	struct wlr_fbox src = *box;
+
+	if (transform % 2 == 0) {
+		dest->width = src.width;
+		dest->height = src.height;
+	} else {
+		dest->width = src.height;
+		dest->height = src.width;
+	}
+
+	switch (transform) {
+	case WL_OUTPUT_TRANSFORM_NORMAL:
+		dest->x = src.x;
+		dest->y = src.y;
+		break;
+	case WL_OUTPUT_TRANSFORM_90:
+		dest->x = height - src.y - src.height;
+		dest->y = src.x;
+		break;
+	case WL_OUTPUT_TRANSFORM_180:
+		dest->x = width - src.x - src.width;
+		dest->y = height - src.y - src.height;
+		break;
+	case WL_OUTPUT_TRANSFORM_270:
+		dest->x = src.y;
+		dest->y = width - src.x - src.width;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED:
+		dest->x = width - src.x - src.width;
+		dest->y = src.y;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+		dest->x = src.y;
+		dest->y = src.x;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+		dest->x = src.x;
+		dest->y = height - src.y - src.height;
+		break;
+	case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+		dest->x = height - src.y - src.height;
+		dest->y = width - src.x - src.width;
+		break;
+	}
 }

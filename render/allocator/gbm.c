@@ -4,9 +4,13 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <wlr/render/allocator.h>
+#include <wlr/render/drm_format_set.h>
 #include <wlr/util/log.h>
 #include <xf86drm.h>
-#include "render/gbm_allocator.h"
+
+#include "render/allocator/gbm.h"
+#include "render/drm_format_set.h"
 
 static const struct wlr_buffer_impl buffer_impl;
 
@@ -36,8 +40,13 @@ static bool export_gbm_bo(struct gbm_bo *bo,
 	int32_t handle = -1;
 	for (i = 0; i < attribs.n_planes; ++i) {
 #if HAS_GBM_BO_GET_FD_FOR_PLANE
-		attribs.fd[i] = gbm_bo_get_fd_for_plane(bo, i);
 		(void)handle;
+
+		attribs.fd[i] = gbm_bo_get_fd_for_plane(bo, i);
+		if (attribs.fd[i] < 0) {
+			wlr_log(WLR_ERROR, "gbm_bo_get_fd_for_plane failed");
+			goto error_fd;
+		}
 #else
 		// GBM is lacking a function to get a FD for a given plane. Instead,
 		// check all planes have the same handle. We can't use
@@ -57,12 +66,11 @@ static bool export_gbm_bo(struct gbm_bo *bo,
 		}
 
 		attribs.fd[i] = gbm_bo_get_fd(bo);
-#endif
-
 		if (attribs.fd[i] < 0) {
 			wlr_log(WLR_ERROR, "gbm_bo_get_fd failed");
 			goto error_fd;
 		}
+#endif
 
 		attribs.offset[i] = gbm_bo_get_offset(bo, i);
 		attribs.stride[i] = gbm_bo_get_stride_for_plane(bo, i);
@@ -82,17 +90,22 @@ static struct wlr_gbm_buffer *create_buffer(struct wlr_gbm_allocator *alloc,
 		int width, int height, const struct wlr_drm_format *format) {
 	struct gbm_device *gbm_device = alloc->gbm_device;
 
-	struct gbm_bo *bo = NULL;
+	assert(format->len > 0);
+
 	bool has_modifier = true;
-	if (format->len > 0) {
-		bo = gbm_bo_create_with_modifiers(gbm_device, width, height,
-			format->format, format->modifiers, format->len);
-	}
+	uint64_t fallback_modifier = DRM_FORMAT_MOD_INVALID;
+	struct gbm_bo *bo = gbm_bo_create_with_modifiers(gbm_device, width, height,
+		format->format, format->modifiers, format->len);
 	if (bo == NULL) {
 		uint32_t usage = GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING;
 		if (format->len == 1 &&
 				format->modifiers[0] == DRM_FORMAT_MOD_LINEAR) {
 			usage |= GBM_BO_USE_LINEAR;
+			fallback_modifier = DRM_FORMAT_MOD_LINEAR;
+		} else if (!wlr_drm_format_has(format, DRM_FORMAT_MOD_INVALID)) {
+			// If the format doesn't accept an implicit modifier, bail out.
+			wlr_log(WLR_ERROR, "gbm_bo_create_with_modifiers failed");
+			return NULL;
 		}
 		bo = gbm_bo_create(gbm_device, width, height, format->format, usage);
 		has_modifier = false;
@@ -121,7 +134,7 @@ static struct wlr_gbm_buffer *create_buffer(struct wlr_gbm_allocator *alloc,
 	// don't populate the modifier field: other parts of the stack may not
 	// understand modifiers, and they can't strip the modifier.
 	if (!has_modifier) {
-		buffer->dmabuf.modifier = DRM_FORMAT_MOD_INVALID;
+		buffer->dmabuf.modifier = fallback_modifier;
 	}
 
 	wlr_log(WLR_DEBUG, "Allocated %dx%d GBM buffer (format 0x%"PRIX32", "
@@ -163,13 +176,7 @@ static struct wlr_gbm_allocator *get_gbm_alloc_from_alloc(
 	return (struct wlr_gbm_allocator *)alloc;
 }
 
-struct wlr_allocator *wlr_gbm_allocator_create(int drm_fd) {
-	int fd = fcntl(drm_fd, F_DUPFD_CLOEXEC, 0);
-	if (fd < 0) {
-		wlr_log(WLR_ERROR, "fcntl(F_DUPFD_CLOEXEC) failed");
-		return NULL;
-	}
-
+struct wlr_allocator *wlr_gbm_allocator_create(int fd) {
 	uint64_t cap;
 	if (drmGetCap(fd, DRM_CAP_PRIME, &cap) ||
 			!(cap & DRM_PRIME_CAP_EXPORT)) {
