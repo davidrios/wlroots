@@ -7,7 +7,7 @@ Build-Depends:
  libavformat-dev,
  libavcodec-dev,
  libcap-dev,
- libdrm-dev (>= 2.4.105),
+ libdrm-dev (>= 2.4.109),
  libegl1-mesa-dev,
  libgbm-dev (>= 17.1.0),
  libgles2-mesa-dev,
