@@ -30,7 +30,7 @@ Build-Depends:
  libxcb-xinput-dev,
  libx11-xcb-dev,
  libxkbcommon-dev,
- meson (>= 0.51.2),
+ meson (>= 0.58.1),
  pkg-config,
  wayland-protocols (>= 1.17),
  xwayland,
