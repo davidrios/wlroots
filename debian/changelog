@@ -1,3 +1,16 @@
+wlroots (0.15.1-4) unstable; urgency=medium
+
+  * [df38414] Move upstream patches to d/patches/upstream.
+    Move patches cherry-picked from usptream to a separate folder.
+    This makes it obvious that they can be dropped when moving to
+    a new upstream version.
+  * [f1f2322] Fix occasional phoc crash on pinephone{,-pro}
+    Thanks to Andrey Skvortsov for testing (Closes: #1025870)
+  * [29b2f82] d/gbp.conf: Adjust for unstable
+    debian/latest ships 0.16.0 already
+
+ -- Guido Günther <agx@sigxcpu.org>  Sun, 11 Dec 2022 14:15:23 +0100
+
 wlroots (0.15.1-3) unstable; urgency=medium
 
   * [01320b4] Backport upstream patch to fix build with ffmpeg 5.0
