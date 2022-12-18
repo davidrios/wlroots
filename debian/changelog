@@ -1,3 +1,10 @@
+wlroots (0.15.1-4.1) UNRELEASED; urgency=medium
+
+  * Non-maintainer upload.
+  * Import hidpi patch 
+
+ -- David Rios <david.rios.gomes@gmail.com>  Sun, 18 Dec 2022 03:52:32 +0000
+
 wlroots (0.15.1-4) unstable; urgency=medium
 
   * [df38414] Move upstream patches to d/patches/upstream.
